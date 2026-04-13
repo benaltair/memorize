@@ -486,34 +486,41 @@
     return effectDeck.pop();
   }
 
-  // URL sharing: compress with deflate, fallback to plain encoding
-  function encodeQuote(text) {
-    try {
-      var bytes = new TextEncoder().encode(text);
-      // Use simple base64 of raw bytes - short enough for most quotes
-      // Try deflate compression via CompressionStream if available
-      if (typeof CompressionStream !== 'undefined') {
-        return compressAsync(bytes).then(function(compressed) {
-          return 'c=' + btoa(String.fromCharCode.apply(null, compressed)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-        });
-      }
-    } catch(e) {}
-    return Promise.resolve('q=' + encodeURIComponent(text));
+  // URL sharing: Brotli quality 11 via brotli-wasm, fallback to plain encoding
+  var brotliReady = null;
+  function loadBrotli() {
+    if (brotliReady) return brotliReady;
+    brotliReady = import('https://cdn.jsdelivr.net/npm/brotli-wasm@3.0.1/index.web.js').then(function(mod) {
+      return mod.default();
+    });
+    return brotliReady;
   }
 
-  function compressAsync(bytes) {
-    var cs = new CompressionStream('deflate-raw');
-    var writer = cs.writable.getWriter();
-    writer.write(bytes);
-    writer.close();
-    return new Response(cs.readable).arrayBuffer().then(function(buf) {
-      return new Uint8Array(buf);
+  function encodeQuote(text) {
+    var bytes = new TextEncoder().encode(text);
+    return loadBrotli().then(function(brotli) {
+      var compressed = brotli.compress(bytes, { quality: 11 });
+      return 'b=' + btoa(String.fromCharCode.apply(null, compressed)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }).catch(function() {
+      return 'q=' + encodeURIComponent(text);
     });
   }
 
   function decodeQuote(params) {
+    var b = params.get('b');
     var c = params.get('c');
     var q = params.get('q');
+    if (b) {
+      return loadBrotli().then(function(brotli) {
+        var raw = b.replace(/-/g, '+').replace(/_/g, '/');
+        while (raw.length % 4) raw += '=';
+        var binary = atob(raw);
+        var bytes = new Uint8Array(binary.length);
+        for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        return new TextDecoder().decode(brotli.decompress(bytes));
+      }).catch(function() { return null; });
+    }
+    // Legacy deflate-raw support for old shared links
     if (c) {
       try {
         var raw = c.replace(/-/g, '+').replace(/_/g, '/');
@@ -522,20 +529,16 @@
         var bytes = new Uint8Array(binary.length);
         for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
         if (typeof DecompressionStream !== 'undefined') {
-          return decompressAsync(bytes);
+          var ds = new DecompressionStream('deflate-raw');
+          var writer = ds.writable.getWriter();
+          writer.write(bytes);
+          writer.close();
+          return new Response(ds.readable).text();
         }
       } catch(e) {}
     }
     if (q) return Promise.resolve(decodeURIComponent(q));
     return Promise.resolve(null);
-  }
-
-  function decompressAsync(bytes) {
-    var ds = new DecompressionStream('deflate-raw');
-    var writer = ds.writable.getWriter();
-    writer.write(bytes);
-    writer.close();
-    return new Response(ds.readable).text();
   }
 
   // Show toast notification

@@ -123,7 +123,7 @@
   }
 
   .text-btn:hover { color: var(--text); }
-  .text-btn:disabled { opacity: 0; pointer-events: none; }
+  .text-btn:disabled { opacity: 0.35; cursor: default; }
 
   #begin-btn {
     padding: 0.75rem 2.8rem;
@@ -373,7 +373,7 @@
   </p>
   <textarea id="quote-input" placeholder="Enter a quote or passage to memorize..."></textarea>
   <div class="entry-buttons">
-    <button class="text-btn" id="example-btn">Example</button>
+    <button class="text-btn" id="example-btn" title="Enter an example quote">Example</button>
     <button id="begin-btn" disabled>Begin</button>
   </div>
 </div>

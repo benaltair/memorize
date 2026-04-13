@@ -616,7 +616,8 @@
   quoteInput.addEventListener('input', function() {
     var hasText = this.value.trim().length > 0;
     beginBtn.disabled = !hasText;
-    exampleBtn.disabled = hasText;
+    exampleBtn.textContent = hasText ? 'Reset' : 'Example';
+    exampleBtn.title = hasText ? 'Clear the text' : 'Enter an example quote';
   });
 
   quoteInput.addEventListener('keydown', function(e) {
@@ -624,9 +625,14 @@
   });
 
   exampleBtn.addEventListener('click', function() {
-    if (quoteInput.value.trim()) return;
-    quoteInput.value = nextExample();
-    quoteInput.dispatchEvent(new Event('input'));
+    if (quoteInput.value.trim()) {
+      quoteInput.value = '';
+      quoteInput.dispatchEvent(new Event('input'));
+      quoteInput.focus();
+    } else {
+      quoteInput.value = nextExample();
+      quoteInput.dispatchEvent(new Event('input'));
+    }
   });
 
   beginBtn.addEventListener('click', startPractice);

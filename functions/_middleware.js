@@ -1,64 +1,66 @@
+const SITE = 'https://memorizes.org';
+
 const BOT_UA = /bot|crawl|spider|slurp|facebookexternalhit|Facebot|Twitterbot|LinkedInBot|WhatsApp|TelegramBot|Discordbot|Googlebot|Bingbot|Baiduspider|DuckDuckBot|Pinterestbot|Slackbot|vkShare|Embedly|redditbot|Applebot|iMessageLinkPrefetch/i;
 
-async function decodeBrotli(b64) {
-  const raw = b64.replace(/-/g, '+').replace(/_/g, '/');
-  const padded = raw + '='.repeat((4 - (raw.length % 4)) % 4);
+function decodeBase64Url(b64url) {
+  const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
   const binary = atob(padded);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
 
-  const ds = new DecompressionStream('br');
+async function decompress(bytes, format) {
+  const ds = new DecompressionStream(format);
   const writer = ds.writable.getWriter();
   writer.write(bytes);
   writer.close();
   return new Response(ds.readable).text();
 }
 
-async function decodeDeflateRaw(b64) {
-  const raw = b64.replace(/-/g, '+').replace(/_/g, '/');
-  const padded = raw + '='.repeat((4 - (raw.length % 4)) % 4);
-  const binary = atob(padded);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-
-  const ds = new DecompressionStream('deflate-raw');
-  const writer = ds.writable.getWriter();
-  writer.write(bytes);
-  writer.close();
-  return new Response(ds.readable).text();
-}
-
-function extractQuote(url) {
+async function extractQuote(url) {
   const params = new URL(url).searchParams;
 
+  // Current canonical format: deflate-raw
+  if (params.has('t')) {
+    return decompress(decodeBase64Url(params.get('t')), 'deflate-raw');
+  }
+  // Legacy: Brotli (from brotli-wasm era)
   if (params.has('b')) {
-    return decodeBrotli(params.get('b'));
+    return decompress(decodeBase64Url(params.get('b')), 'br');
   }
+  // Legacy: deflate-raw with old param name
   if (params.has('c')) {
-    return decodeDeflateRaw(params.get('c'));
+    return decompress(decodeBase64Url(params.get('c')), 'deflate-raw');
   }
+  // Plaintext fallback
   if (params.has('q')) {
-    return Promise.resolve(decodeURIComponent(params.get('q')));
+    return decodeURIComponent(params.get('q'));
   }
-  return Promise.resolve(null);
+  return null;
+}
+
+function hasQuoteParam(params) {
+  return params.has('t') || params.has('b') || params.has('c') || params.has('q');
 }
 
 function buildMeta(text) {
-  const snippet = text.length > 200 ? text.slice(0, 200) + '...' : text;
-  const titleText = text.length > 60 ? text.slice(0, 60) + '...' : text;
+  const snippet = text.length > 200 ? text.slice(0, 200) + '\u2026' : text;
+  const titleSnippet = text.length > 60 ? text.slice(0, 60) + '\u2026' : text;
   return {
-    title: `Memorize: \u201c${titleText}\u201d`,
+    title: `Memorize: \u201c${titleSnippet}\u201d`,
     description: `\u201c${snippet}\u201d \u2014 Memorize this passage word by word.`,
   };
 }
 
+function escapeHtml(str) {
+  return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 class MetaRewriter {
-  constructor(value) {
-    this.value = value;
-  }
-  element(el) {
-    el.setAttribute('content', this.value);
-  }
+  constructor(value) { this.value = value; }
+  element(el) { el.setAttribute('content', this.value); }
 }
 
 class TitleRewriter {
@@ -66,12 +68,28 @@ class TitleRewriter {
   element(el) { el.setInnerContent(this.text); }
 }
 
+class OgImageInjector {
+  constructor(imageUrl) { this.imageUrl = imageUrl; }
+  element(el) {
+    el.append(`<meta property="og:image" content="${escapeHtml(this.imageUrl)}">`, { html: true });
+    el.append(`<meta property="og:image:width" content="1200">`, { html: true });
+    el.append(`<meta property="og:image:height" content="630">`, { html: true });
+    el.append(`<meta name="twitter:image" content="${escapeHtml(this.imageUrl)}">`, { html: true });
+  }
+}
+
+class TwitterCardRewriter {
+  element(el) { el.setAttribute('content', 'summary_large_image'); }
+}
+
 export async function onRequest(context) {
   const { request, next } = context;
   const url = new URL(request.url);
   const ua = request.headers.get('user-agent') || '';
+  const params = url.searchParams;
 
-  if (!BOT_UA.test(ua) || (!url.searchParams.has('b') && !url.searchParams.has('q') && !url.searchParams.has('c'))) {
+  // Skip middleware for the OG image endpoint and non-bot/non-quote requests
+  if (url.pathname === '/og.png' || !BOT_UA.test(ua) || !hasQuoteParam(params)) {
     return next();
   }
 
@@ -81,10 +99,11 @@ export async function onRequest(context) {
   } catch {
     return next();
   }
-
   if (!text) return next();
 
   const { title, description } = buildMeta(text);
+  const canonicalUrl = `${SITE}${url.pathname}${url.search}`;
+  const imageUrl = `${SITE}/og.png${url.search}`;
   const res = await next();
 
   return new HTMLRewriter()
@@ -92,8 +111,10 @@ export async function onRequest(context) {
     .on('meta[name="description"]', new MetaRewriter(description))
     .on('meta[property="og:title"]', new MetaRewriter(title))
     .on('meta[property="og:description"]', new MetaRewriter(description))
-    .on('meta[property="og:url"]', new MetaRewriter(request.url))
+    .on('meta[property="og:url"]', new MetaRewriter(canonicalUrl))
+    .on('meta[name="twitter:card"]', new TwitterCardRewriter())
     .on('meta[name="twitter:title"]', new MetaRewriter(title))
     .on('meta[name="twitter:description"]', new MetaRewriter(description))
+    .on('head', new OgImageInjector(imageUrl))
     .transform(res);
 }

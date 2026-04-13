@@ -10,9 +10,9 @@
 <meta property="og:title" content="Memorize">
 <meta property="og:description" content="A minimal memorization tool. Hide words one by one until you can recite from memory.">
 <meta property="og:type" content="website">
-<meta property="og:url" content="">
+<meta property="og:url" content="https://memorizes.org/">
 <meta property="og:site_name" content="Memorize">
-<meta name="twitter:card" content="summary">
+<meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Memorize">
 <meta name="twitter:description" content="A minimal memorization tool. Hide words one by one until you can recite from memory.">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -491,58 +491,79 @@
     return effectDeck.pop();
   }
 
-  // URL sharing: Brotli quality 11 via brotli-wasm, fallback to plain encoding
-  var brotliReady = null;
-  function loadBrotli() {
-    if (brotliReady) return brotliReady;
-    brotliReady = import('https://cdn.jsdelivr.net/npm/brotli-wasm@3.0.1/index.web.js').then(function(mod) {
-      return mod.default();
+  // URL sharing: deflate-raw via native CompressionStream (no external deps)
+  function toBase64Url(bytes) {
+    var binary = '';
+    for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  function fromBase64Url(str) {
+    var raw = str.replace(/-/g, '+').replace(/_/g, '/');
+    while (raw.length % 4) raw += '=';
+    var binary = atob(raw);
+    var bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+
+  function compressDeflateRaw(bytes) {
+    var cs = new CompressionStream('deflate-raw');
+    var writer = cs.writable.getWriter();
+    writer.write(bytes);
+    writer.close();
+    return new Response(cs.readable).arrayBuffer().then(function(buf) {
+      return new Uint8Array(buf);
     });
-    return brotliReady;
+  }
+
+  function decompressStream(bytes, format) {
+    var ds = new DecompressionStream(format);
+    var writer = ds.writable.getWriter();
+    writer.write(bytes);
+    writer.close();
+    return new Response(ds.readable).text();
   }
 
   function encodeQuote(text) {
     var bytes = new TextEncoder().encode(text);
-    return loadBrotli().then(function(brotli) {
-      var compressed = brotli.compress(bytes, { quality: 11 });
-      return 'b=' + btoa(String.fromCharCode.apply(null, compressed)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    }).catch(function() {
-      return 'q=' + encodeURIComponent(text);
-    });
+    if (typeof CompressionStream !== 'undefined') {
+      return compressDeflateRaw(bytes).then(function(compressed) {
+        return 't=' + toBase64Url(compressed);
+      }).catch(function() {
+        return 'q=' + encodeURIComponent(text);
+      });
+    }
+    return Promise.resolve('q=' + encodeURIComponent(text));
   }
 
   function decodeQuote(params) {
-    var b = params.get('b');
-    var c = params.get('c');
-    var q = params.get('q');
-    if (b) {
-      return loadBrotli().then(function(brotli) {
-        var raw = b.replace(/-/g, '+').replace(/_/g, '/');
-        while (raw.length % 4) raw += '=';
-        var binary = atob(raw);
-        var bytes = new Uint8Array(binary.length);
-        for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-        return new TextDecoder().decode(brotli.decompress(bytes));
-      }).catch(function() { return null; });
+    // Current canonical format
+    if (params.has('t')) {
+      return decompressStream(fromBase64Url(params.get('t')), 'deflate-raw');
     }
-    // Legacy deflate-raw support for old shared links
-    if (c) {
-      try {
-        var raw = c.replace(/-/g, '+').replace(/_/g, '/');
-        while (raw.length % 4) raw += '=';
-        var binary = atob(raw);
-        var bytes = new Uint8Array(binary.length);
-        for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-        if (typeof DecompressionStream !== 'undefined') {
-          var ds = new DecompressionStream('deflate-raw');
-          var writer = ds.writable.getWriter();
-          writer.write(bytes);
-          writer.close();
-          return new Response(ds.readable).text();
-        }
-      } catch(e) {}
+    // Legacy: Brotli (old shared links) -- cannot decode client-side without WASM,
+    // but the server middleware will redirect these to ?t= format.
+    // Try DecompressionStream('deflate-raw') for ?c= legacy links.
+    if (params.has('c')) {
+      return decompressStream(fromBase64Url(params.get('c')), 'deflate-raw');
     }
-    if (q) return Promise.resolve(decodeURIComponent(q));
+    // Plaintext fallback
+    if (params.has('q')) {
+      return Promise.resolve(decodeURIComponent(params.get('q')));
+    }
+    // Legacy Brotli links (?b=) -- the text is already in the page if server-rendered,
+    // but for direct browser hits, we can't decode without brotli-wasm.
+    // Dynamically load brotli-wasm only for these legacy links.
+    if (params.has('b')) {
+      return import('https://cdn.jsdelivr.net/npm/brotli-wasm@3.0.1/index.web.js')
+        .then(function(mod) { return mod.default(); })
+        .then(function(brotli) {
+          var bytes = fromBase64Url(params.get('b'));
+          return new TextDecoder().decode(brotli.decompress(bytes));
+        })
+        .catch(function() { return null; });
+    }
     return Promise.resolve(null);
   }
 
@@ -627,12 +648,12 @@
     updateCounter();
     applySize();
 
-    // Put the quote in the URL and update meta tags for sharing
-    updateMetaTags(text);
+    // Encode quote into URL, then update meta tags (needs final URL)
     encodeQuote(text).then(function(param) {
       if (history.replaceState) {
         history.replaceState(null, '', location.pathname + '?' + param);
       }
+      updateMetaTags(text);
     });
 
     entryScreen.style.display = 'none';
@@ -667,22 +688,18 @@
 
   function exitPractice() {
     cleanupEffect();
-    // Clear the quote from the URL and reset meta tags
     if (history.replaceState) {
       history.replaceState(null, '', location.pathname);
     }
     document.title = 'Memorize';
     var defaultDesc = 'A minimal memorization tool. Hide words one by one until you can recite from memory.';
-    var tags = {
+    setMetaContent({
       'description': defaultDesc,
       'og:title': 'Memorize',
       'og:description': defaultDesc,
+      'og:url': location.origin + location.pathname,
       'twitter:title': 'Memorize',
       'twitter:description': defaultDesc,
-    };
-    Object.keys(tags).forEach(function(key) {
-      var el = document.querySelector('meta[property="' + key + '"], meta[name="' + key + '"]');
-      if (el) el.setAttribute('content', tags[key]);
     });
     practiceScreen.style.display = 'none';
     entryScreen.style.display = 'flex';
@@ -916,34 +933,37 @@
     };
   }
 
-  function updateMetaTags(text) {
-    var snippet = text.length > 200 ? text.slice(0, 200) + '...' : text;
-    var desc = '"' + snippet + '" -- Memorize this passage word by word.';
-    var title = 'Memorize: "' + (text.length > 60 ? text.slice(0, 60) + '...' : text) + '"';
-    document.title = title;
-    var tags = {
-      'description': desc,
-      'og:title': title,
-      'og:description': desc,
-      'og:url': location.href,
-      'twitter:title': title,
-      'twitter:description': desc,
-    };
+  function setMetaContent(tags) {
     Object.keys(tags).forEach(function(key) {
       var el = document.querySelector('meta[property="' + key + '"], meta[name="' + key + '"]');
       if (el) el.setAttribute('content', tags[key]);
     });
   }
 
+  function updateMetaTags(text) {
+    var snippet = text.length > 200 ? text.slice(0, 200) + '\u2026' : text;
+    var titleSnippet = text.length > 60 ? text.slice(0, 60) + '\u2026' : text;
+    var title = 'Memorize: \u201c' + titleSnippet + '\u201d';
+    var desc = '\u201c' + snippet + '\u201d \u2014 Memorize this passage word by word.';
+    document.title = title;
+    setMetaContent({
+      'description': desc,
+      'og:title': title,
+      'og:description': desc,
+      'og:url': location.href,
+      'twitter:title': title,
+      'twitter:description': desc,
+    });
+  }
+
   // ---- Load shared quote from URL ----
   (function loadFromURL() {
     var params = new URLSearchParams(location.search);
-    if (!params.has('q') && !params.has('c') && !params.has('b')) return;
+    if (!params.has('t') && !params.has('q') && !params.has('c') && !params.has('b')) return;
     decodeQuote(params).then(function(text) {
       if (!text) return;
       quoteInput.value = text;
       quoteInput.dispatchEvent(new Event('input'));
-      updateMetaTags(text);
       startPractice();
     });
   })();

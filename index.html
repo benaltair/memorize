@@ -619,6 +619,13 @@
     updateCounter();
     applySize();
 
+    // Put the quote in the URL so browser share/copy-URL works
+    encodeQuote(text).then(function(param) {
+      if (history.replaceState) {
+        history.replaceState(null, '', location.pathname + '?' + param);
+      }
+    });
+
     entryScreen.style.display = 'none';
     practiceScreen.style.display = 'flex';
   }
@@ -651,25 +658,31 @@
 
   function exitPractice() {
     cleanupEffect();
+    // Clear the quote from the URL
+    if (history.replaceState) {
+      history.replaceState(null, '', location.pathname);
+    }
     practiceScreen.style.display = 'none';
     entryScreen.style.display = 'flex';
   }
 
   function shareQuote() {
-    var text = quoteInput.value.trim();
-    if (!text) return;
-    encodeQuote(text).then(function(param) {
-      var url = location.origin + location.pathname + '?' + param;
-      if (navigator.share) {
-        navigator.share({ title: 'Memorize', url: url }).catch(function() {});
-      } else if (navigator.clipboard) {
-        navigator.clipboard.writeText(url).then(function() {
-          showToast('Link copied to clipboard');
-        });
-      } else {
-        prompt('Copy this link:', url);
-      }
-    });
+    var url = location.href;
+    if (navigator.share) {
+      navigator.share({ title: 'Memorize', url: url }).catch(function() {});
+    } else if (navigator.clipboard) {
+      navigator.clipboard.writeText(url).then(function() {
+        // Show checkmark on the share button
+        var original = shareBtn.innerHTML;
+        shareBtn.innerHTML = '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>';
+        shareBtn.style.color = 'var(--text)';
+        setTimeout(function() {
+          shareBtn.innerHTML = original;
+          shareBtn.style.color = '';
+        }, 1800);
+        showToast('Link copied');
+      });
+    }
   }
 
   function cycleTheme() {
@@ -887,10 +900,7 @@
       if (!text) return;
       quoteInput.value = text;
       quoteInput.dispatchEvent(new Event('input'));
-      // Auto-clean URL without reloading
-      if (history.replaceState) {
-        history.replaceState(null, '', location.pathname);
-      }
+      startPractice();
     });
   })();
 

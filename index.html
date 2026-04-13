@@ -10,6 +10,10 @@
 <meta property="og:title" content="Memorize">
 <meta property="og:description" content="A minimal memorization tool. Hide words one by one until you can recite from memory.">
 <meta property="og:type" content="website">
+<meta property="og:site_name" content="Memorize">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Memorize">
+<meta name="twitter:description" content="A minimal memorization tool. Hide words one by one until you can recite from memory.">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📖</text></svg>">
@@ -622,7 +626,8 @@
     updateCounter();
     applySize();
 
-    // Put the quote in the URL so browser share/copy-URL works
+    // Put the quote in the URL and update meta tags for sharing
+    updateMetaTags(text);
     encodeQuote(text).then(function(param) {
       if (history.replaceState) {
         history.replaceState(null, '', location.pathname + '?' + param);
@@ -661,18 +666,33 @@
 
   function exitPractice() {
     cleanupEffect();
-    // Clear the quote from the URL
+    // Clear the quote from the URL and reset meta tags
     if (history.replaceState) {
       history.replaceState(null, '', location.pathname);
     }
+    document.title = 'Memorize';
+    var defaultDesc = 'A minimal memorization tool. Hide words one by one until you can recite from memory.';
+    var tags = {
+      'description': defaultDesc,
+      'og:title': 'Memorize',
+      'og:description': defaultDesc,
+      'twitter:title': 'Memorize',
+      'twitter:description': defaultDesc,
+    };
+    Object.keys(tags).forEach(function(key) {
+      var el = document.querySelector('meta[property="' + key + '"], meta[name="' + key + '"]');
+      if (el) el.setAttribute('content', tags[key]);
+    });
     practiceScreen.style.display = 'none';
     entryScreen.style.display = 'flex';
   }
 
   function shareQuote() {
     var url = location.href;
+    var text = quoteInput.value.trim();
+    var snippet = text.length > 120 ? text.slice(0, 120) + '...' : text;
     if (navigator.share) {
-      navigator.share({ title: 'Memorize', url: url }).catch(function() {});
+      navigator.share({ title: 'Memorize: "' + snippet + '"', text: text, url: url }).catch(function() {});
     } else if (navigator.clipboard) {
       navigator.clipboard.writeText(url).then(function() {
         // Show checkmark on the share button
@@ -895,14 +915,33 @@
     };
   }
 
+  function updateMetaTags(text) {
+    var snippet = text.length > 200 ? text.slice(0, 200) + '...' : text;
+    var desc = '"' + snippet + '" -- Memorize this passage word by word.';
+    var title = 'Memorize: "' + (text.length > 60 ? text.slice(0, 60) + '...' : text) + '"';
+    document.title = title;
+    var tags = {
+      'description': desc,
+      'og:title': title,
+      'og:description': desc,
+      'twitter:title': title,
+      'twitter:description': desc,
+    };
+    Object.keys(tags).forEach(function(key) {
+      var el = document.querySelector('meta[property="' + key + '"], meta[name="' + key + '"]');
+      if (el) el.setAttribute('content', tags[key]);
+    });
+  }
+
   // ---- Load shared quote from URL ----
   (function loadFromURL() {
     var params = new URLSearchParams(location.search);
-    if (!params.has('q') && !params.has('c')) return;
+    if (!params.has('q') && !params.has('c') && !params.has('b')) return;
     decodeQuote(params).then(function(text) {
       if (!text) return;
       quoteInput.value = text;
       quoteInput.dispatchEvent(new Event('input'));
+      updateMetaTags(text);
       startPractice();
     });
   })();

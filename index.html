@@ -276,6 +276,32 @@
     text-align: center;
   }
 
+  /* Hint tooltip */
+  .hint {
+    position: absolute;
+    bottom: 1.2rem;
+    left: 50%;
+    transform: translateX(-50%) translateY(8px);
+    background: var(--bg-secondary);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    padding: 0.5rem 1.2rem;
+    border-radius: 6px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 0.8rem;
+    font-style: italic;
+    opacity: 0;
+    transition: opacity 0.5s ease, transform 0.5s ease;
+    pointer-events: none;
+    z-index: 50;
+    white-space: nowrap;
+  }
+
+  .hint.visible {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+
   /* Share toast */
   .toast {
     position: fixed;
@@ -409,6 +435,7 @@
 
   <div class="quote-container" id="quote-container">
     <div class="quote-text size-3" id="quote-display"></div>
+    <div class="hint" id="hint">Tap a word to hide it</div>
   </div>
 
   <div class="bottom-bar">
@@ -447,10 +474,18 @@
   const minSize = 1;
   const maxSize = 7;
   const themes = ['light', 'sepia', 'dark'];
-  let themeIndex = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 2 : 0;
+  var savedTheme = null;
+  try { savedTheme = localStorage.getItem('theme'); } catch(e) {}
+  let themeIndex = savedTheme && themes.indexOf(savedTheme) !== -1
+    ? themes.indexOf(savedTheme)
+    : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 2 : 0);
   document.documentElement.setAttribute('data-theme', themes[themeIndex]);
   let effectCleanup = null;
   let toastTimer = null;
+  let hintTimer = null;
+  var hintDismissed = false;
+  try { hintDismissed = localStorage.getItem('hintDismissed') === '1'; } catch(e) {}
+  const hint = document.getElementById('hint');
 
   // Example quotes from the Ruhi Institute books
   const exampleQuotes = [
@@ -659,6 +694,22 @@
 
     entryScreen.style.display = 'none';
     practiceScreen.style.display = 'flex';
+    scheduleHint();
+  }
+
+  function scheduleHint() {
+    clearTimeout(hintTimer);
+    hint.classList.remove('visible');
+    if (hintDismissed) return;
+    hintTimer = setTimeout(function() { hint.classList.add('visible'); }, 12000);
+  }
+
+  function dismissHint() {
+    if (hintDismissed) return;
+    clearTimeout(hintTimer);
+    hint.classList.remove('visible');
+    hintDismissed = true;
+    try { localStorage.setItem('hintDismissed', '1'); } catch(e) {}
   }
 
   function toggleWord(span) {
@@ -666,6 +717,7 @@
     span.classList.add('hidden');
     hiddenCount++;
     updateCounter();
+    dismissHint();
   }
 
   function hideRandom() {
@@ -675,6 +727,7 @@
     pick.classList.add('hidden');
     hiddenCount++;
     updateCounter();
+    dismissHint();
   }
 
   function revealAll() {
@@ -689,6 +742,8 @@
 
   function exitPractice() {
     cleanupEffect();
+    clearTimeout(hintTimer);
+    hint.classList.remove('visible');
     if (history.replaceState) {
       history.replaceState(null, '', location.pathname);
     }
@@ -730,6 +785,7 @@
   function cycleTheme() {
     themeIndex = (themeIndex + 1) % themes.length;
     document.documentElement.setAttribute('data-theme', themes[themeIndex]);
+    try { localStorage.setItem('theme', themes[themeIndex]); } catch(e) {}
   }
 
   function adjustSize(delta) {

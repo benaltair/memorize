@@ -54,10 +54,6 @@ function buildMeta(text) {
   };
 }
 
-function escapeHtml(str) {
-  return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
 class MetaRewriter {
   constructor(value) { this.value = value; }
   element(el) { el.setAttribute('content', this.value); }
@@ -68,28 +64,13 @@ class TitleRewriter {
   element(el) { el.setInnerContent(this.text); }
 }
 
-class OgImageInjector {
-  constructor(imageUrl) { this.imageUrl = imageUrl; }
-  element(el) {
-    el.append(`<meta property="og:image" content="${escapeHtml(this.imageUrl)}">`, { html: true });
-    el.append(`<meta property="og:image:width" content="1200">`, { html: true });
-    el.append(`<meta property="og:image:height" content="630">`, { html: true });
-    el.append(`<meta name="twitter:image" content="${escapeHtml(this.imageUrl)}">`, { html: true });
-  }
-}
-
-class TwitterCardRewriter {
-  element(el) { el.setAttribute('content', 'summary_large_image'); }
-}
-
 export async function onRequest(context) {
   const { request, next } = context;
   const url = new URL(request.url);
   const ua = request.headers.get('user-agent') || '';
   const params = url.searchParams;
 
-  // Skip middleware for the OG image endpoint and non-bot/non-quote requests
-  if (url.pathname === '/og.png' || !BOT_UA.test(ua) || !hasQuoteParam(params)) {
+  if (!BOT_UA.test(ua) || !hasQuoteParam(params)) {
     return next();
   }
 
@@ -103,7 +84,6 @@ export async function onRequest(context) {
 
   const { title, description } = buildMeta(text);
   const canonicalUrl = `${SITE}${url.pathname}${url.search}`;
-  const imageUrl = `${SITE}/og.png${url.search}`;
   const res = await next();
 
   return new HTMLRewriter()
@@ -112,9 +92,7 @@ export async function onRequest(context) {
     .on('meta[property="og:title"]', new MetaRewriter(title))
     .on('meta[property="og:description"]', new MetaRewriter(description))
     .on('meta[property="og:url"]', new MetaRewriter(canonicalUrl))
-    .on('meta[name="twitter:card"]', new TwitterCardRewriter())
     .on('meta[name="twitter:title"]', new MetaRewriter(title))
     .on('meta[name="twitter:description"]', new MetaRewriter(description))
-    .on('head', new OgImageInjector(imageUrl))
     .transform(res);
 }

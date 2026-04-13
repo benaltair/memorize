@@ -1,7 +1,0 @@
-{
-  "name": "memorize",
-  "private": true,
-  "dependencies": {
-    "@cloudflare/pages-plugin-vercel-og": "^0.1.2"
-  }
-}

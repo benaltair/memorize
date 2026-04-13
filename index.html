@@ -195,12 +195,17 @@
 
   .size-label {
     font-family: 'Georgia', 'Times New Roman', serif;
-    font-size: 0.85rem;
+    font-size: 0.9rem;
     color: var(--text-muted);
-    letter-spacing: 0.02em;
+    letter-spacing: -0.02em;
     user-select: none;
     width: 28px;
     text-align: center;
+  }
+
+  .size-label small {
+    font-size: 0.62em;
+    vertical-align: baseline;
   }
 
   .quote-container {
@@ -421,7 +426,7 @@
       <button class="tool-btn" id="size-down-btn" title="Decrease text size">
         <svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg>
       </button>
-      <span class="size-label" id="size-label">aA</span>
+      <span class="size-label" id="size-label"><small>A</small>A</span>
       <button class="tool-btn" id="size-up-btn" title="Increase text size">
         <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
       </button>
@@ -687,7 +692,9 @@
     });
 
     totalWords = words.length;
-    currentSize = bestSizeForLength(text.length);
+    var savedSize = null;
+    try { savedSize = parseInt(localStorage.getItem('textSize'), 10); } catch(e) {}
+    currentSize = (savedSize >= minSize && savedSize <= maxSize) ? savedSize : bestSizeForLength(text.length);
     updateCounter();
     applySize();
     fitText();
@@ -799,12 +806,12 @@
   function adjustSize(delta) {
     currentSize = Math.max(minSize, Math.min(maxSize, currentSize + delta));
     applySize();
+    try { localStorage.setItem('textSize', currentSize); } catch(e) {}
   }
 
   function applySize() {
     for (var i = minSize; i <= maxSize; i++) quoteDisplay.classList.remove('size-' + i);
     quoteDisplay.classList.add('size-' + currentSize);
-    sizeLabel.textContent = 'aA';
   }
 
   function fitText() {

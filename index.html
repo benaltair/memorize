@@ -57,7 +57,6 @@
     color: var(--text);
     min-height: 100dvh;
     transition: background 0.4s ease, color 0.4s ease;
-    overflow: hidden;
   }
 
   /* ---- Entry Screen ---- */
@@ -68,6 +67,7 @@
     justify-content: center;
     min-height: 100dvh;
     padding: 2rem;
+    overflow-y: auto;
   }
 
   #entry-screen h1 {
@@ -151,6 +151,7 @@
     display: none;
     flex-direction: column;
     height: 100dvh;
+    overflow: hidden;
   }
 
   .toolbar {
@@ -697,7 +698,7 @@
     currentSize = (savedSize >= minSize && savedSize <= maxSize) ? savedSize : bestSizeForLength(text.length);
     updateCounter();
     applySize();
-    fitText();
+    requestAnimationFrame(fitText);
 
     // Encode quote into URL, then update meta tags (needs final URL)
     encodeQuote(text).then(function(param) {
@@ -820,6 +821,21 @@
       applySize();
     }
   }
+
+  var resizeTimer = null;
+  window.addEventListener('resize', function() {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function() {
+      if (practiceScreen.style.display === 'flex' && words.length > 0) {
+        var savedSize = null;
+        try { savedSize = parseInt(localStorage.getItem('textSize'), 10); } catch(e) {}
+        var text = quoteInput.value.trim();
+        currentSize = (savedSize >= minSize && savedSize <= maxSize) ? savedSize : bestSizeForLength(text.length);
+        applySize();
+        fitText();
+      }
+    }, 150);
+  });
 
   // ---- Easter Eggs ----
 

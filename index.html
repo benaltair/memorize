@@ -447,7 +447,8 @@
   const minSize = 1;
   const maxSize = 7;
   const themes = ['light', 'sepia', 'dark'];
-  let themeIndex = 0;
+  let themeIndex = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 2 : 0;
+  document.documentElement.setAttribute('data-theme', themes[themeIndex]);
   let effectCleanup = null;
   let toastTimer = null;
 
@@ -708,9 +709,9 @@
   function shareQuote() {
     var url = location.href;
     var text = quoteInput.value.trim();
-    var snippet = text.length > 120 ? text.slice(0, 120) + '...' : text;
+    var snippet = text.length > 120 ? text.slice(0, 120) + '\u2026' : text;
     if (navigator.share) {
-      navigator.share({ title: 'Memorize: "' + snippet + '"', text: text, url: url }).catch(function() {});
+      navigator.share({ title: 'Memorize: \u201c' + snippet + '\u201d', url: url }).catch(function() {});
     } else if (navigator.clipboard) {
       navigator.clipboard.writeText(url).then(function() {
         // Show checkmark on the share button

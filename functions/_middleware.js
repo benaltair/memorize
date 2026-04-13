@@ -21,23 +21,10 @@ async function decompress(bytes, format) {
 
 async function extractQuote(url) {
   const params = new URL(url).searchParams;
-
-  // Current canonical format: deflate-raw
-  if (params.has('t')) {
-    return decompress(decodeBase64Url(params.get('t')), 'deflate-raw');
-  }
-  // Legacy: Brotli (from brotli-wasm era)
-  if (params.has('b')) {
-    return decompress(decodeBase64Url(params.get('b')), 'br');
-  }
-  // Legacy: deflate-raw with old param name
-  if (params.has('c')) {
-    return decompress(decodeBase64Url(params.get('c')), 'deflate-raw');
-  }
-  // Plaintext fallback
-  if (params.has('q')) {
-    return decodeURIComponent(params.get('q'));
-  }
+  if (params.has('t')) return decompress(decodeBase64Url(params.get('t')), 'deflate-raw');
+  if (params.has('b')) return decompress(decodeBase64Url(params.get('b')), 'br');
+  if (params.has('c')) return decompress(decodeBase64Url(params.get('c')), 'deflate-raw');
+  if (params.has('q')) return decodeURIComponent(params.get('q'));
   return null;
 }
 
@@ -45,23 +32,16 @@ function hasQuoteParam(params) {
   return params.has('t') || params.has('b') || params.has('c') || params.has('q');
 }
 
-function buildMeta(text) {
+function esc(str) {
+  return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function buildMeta(text, canonicalUrl) {
   const snippet = text.length > 200 ? text.slice(0, 200) + '\u2026' : text;
   const titleSnippet = text.length > 60 ? text.slice(0, 60) + '\u2026' : text;
-  return {
-    title: `Memorize: \u201c${titleSnippet}\u201d`,
-    description: `\u201c${snippet}\u201d \u2014 Memorize this passage word by word.`,
-  };
-}
-
-class MetaRewriter {
-  constructor(value) { this.value = value; }
-  element(el) { el.setAttribute('content', this.value); }
-}
-
-class TitleRewriter {
-  constructor(text) { this.text = text; }
-  element(el) { el.setInnerContent(this.text); }
+  const title = `Memorize: \u201c${titleSnippet}\u201d`;
+  const description = `\u201c${snippet}\u201d \u2014 Memorize this passage word by word.`;
+  return { title, description };
 }
 
 export async function onRequest(context) {
@@ -77,22 +57,31 @@ export async function onRequest(context) {
   let text;
   try {
     text = await extractQuote(request.url);
-  } catch {
+  } catch (e) {
     return next();
   }
   if (!text) return next();
 
-  const { title, description } = buildMeta(text);
   const canonicalUrl = `${SITE}${url.pathname}${url.search}`;
-  const res = await next();
+  const { title, description } = buildMeta(text, canonicalUrl);
 
-  return new HTMLRewriter()
-    .on('title', new TitleRewriter(title))
-    .on('meta[name="description"]', new MetaRewriter(description))
-    .on('meta[property="og:title"]', new MetaRewriter(title))
-    .on('meta[property="og:description"]', new MetaRewriter(description))
-    .on('meta[property="og:url"]', new MetaRewriter(canonicalUrl))
-    .on('meta[name="twitter:title"]', new MetaRewriter(title))
-    .on('meta[name="twitter:description"]', new MetaRewriter(description))
-    .transform(res);
+  const res = await next();
+  const html = await res.text();
+
+  const patched = html
+    .replace(/<title>[^<]*<\/title>/, `<title>${esc(title)}</title>`)
+    .replace(/(<meta name="description" content=")[^"]*"/, `$1${esc(description)}"`)
+    .replace(/(<meta property="og:title" content=")[^"]*"/, `$1${esc(title)}"`)
+    .replace(/(<meta property="og:description" content=")[^"]*"/, `$1${esc(description)}"`)
+    .replace(/(<meta property="og:url" content=")[^"]*"/, `$1${esc(canonicalUrl)}"`)
+    .replace(/(<meta name="twitter:title" content=")[^"]*"/, `$1${esc(title)}"`)
+    .replace(/(<meta name="twitter:description" content=")[^"]*"/, `$1${esc(description)}"`);
+
+  return new Response(patched, {
+    status: res.status,
+    headers: {
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'public, max-age=3600',
+    },
+  });
 }

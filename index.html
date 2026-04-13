@@ -210,6 +210,7 @@
     justify-content: center;
     padding: 1rem 3rem 2rem;
     overflow: hidden;
+    overflow-y: auto;
     position: relative;
   }
 
@@ -689,6 +690,7 @@
     currentSize = bestSizeForLength(text.length);
     updateCounter();
     applySize();
+    fitText();
 
     // Encode quote into URL, then update meta tags (needs final URL)
     encodeQuote(text).then(function(param) {
@@ -803,6 +805,13 @@
     for (var i = minSize; i <= maxSize; i++) quoteDisplay.classList.remove('size-' + i);
     quoteDisplay.classList.add('size-' + currentSize);
     sizeLabel.textContent = 'aA';
+  }
+
+  function fitText() {
+    while (currentSize > minSize && quoteDisplay.scrollHeight > quoteContainer.clientHeight) {
+      currentSize--;
+      applySize();
+    }
   }
 
   // ---- Easter Eggs ----
